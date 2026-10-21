@@ -185,6 +185,14 @@
     <!-- Preferences -->
     <string name="category_general_settings">General Settings</string>
     <string name="category_video_settings">Video Settings</string>
+
+    <!-- Exynos Decoder Latency Fix / Screen Recorder Simulation -->
+    <string name="title_exynos_recorder_mode">ghi hinh giả lập</string>
+    <string name="summary_exynos_recorder_mode">Cho phép artermis giả lập quay màn hình, giảm độ trể phù hợp cho các dòng máy chạy exynox</string>
+    <string name="exynos_recorder_mode_off">Tắt</string>
+    <string name="exynos_recorder_mode_dummy_encoder">Giả lập Ghi hình - Mức 1 (Dummy Hardware Encoder)</string>
+    <string name="exynos_recorder_mode_dummy_virtual_display">Giả lập Ghi hình - Mức 2 (Encoder + VirtualDisplay)</string>
+    <string name="exynos_recorder_mode_real_record">Ghi hình thực tế (Lưu file MP4)</string>
     <string name="title_resolution_list">Video resolution</string>
     <string name="summary_resolution_list">Increase to improve image clarity. Decrease for better performance on lower end devices and slower networks.</string>
     <string name="title_native_res_dialog">Native Resolution Warning</string>

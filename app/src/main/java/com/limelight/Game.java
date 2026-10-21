@@ -25,6 +25,7 @@ import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
 import com.limelight.binding.video.CrashListener;
+import com.limelight.binding.video.ExynosMfcBooster;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
@@ -177,6 +178,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private KeyBoardLayoutController keyBoardLayoutController;
 
     private PreferenceConfiguration prefConfig;
+    private ExynosMfcBooster exynosMfcBooster;
     private SharedPreferences tombstonePrefs;
 
     private int displayWidth;
@@ -353,6 +355,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
         tombstonePrefs = Game.this.getSharedPreferences("DecoderTombstone", 0);
+        exynosMfcBooster = new ExynosMfcBooster();
 
         if (prefConfig.fullScreen) {
             // Full-screen
@@ -1699,8 +1702,22 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (exynosMfcBooster != null && prefConfig != null) {
+            exynosMfcBooster.start(this, prefConfig.exynosRecorderMode);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        if (exynosMfcBooster != null) {
+            exynosMfcBooster.stop();
+            exynosMfcBooster = null;
+        }
 
         instance = null;
         timerHandler.removeCallbacksAndMessages(null);
@@ -1744,6 +1761,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     protected void onPause() {
+        if (exynosMfcBooster != null) {
+            exynosMfcBooster.stop();
+        }
+
         if (isFinishing()) {
             // Stop any further input device notifications before we lose focus (and pointer capture)
             if (controllerHandler != null) {

@@ -10,6 +10,14 @@
         app:initialExpandedChildrenCount="3"
         app:iconSpaceReserved="false">
         <ListPreference
+            android:defaultValue="off"
+            android:entries="@array/exynos_recorder_mode_names"
+            android:entryValues="@array/exynos_recorder_mode_values"
+            android:key="pref_exynos_recorder_mode"
+            android:summary="@string/summary_exynos_recorder_mode"
+            android:title="@string/title_exynos_recorder_mode"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             android:defaultValue="1280x720"
             android:entries="@array/resolution_names"
             android:entryValues="@array/resolution_values"

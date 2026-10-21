@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string-array name="exynos_recorder_mode_names">
+        <item>@string/exynos_recorder_mode_off</item>
+        <item>@string/exynos_recorder_mode_dummy_encoder</item>
+        <item>@string/exynos_recorder_mode_dummy_virtual_display</item>
+        <item>@string/exynos_recorder_mode_real_record</item>
+    </string-array>
+    <string-array name="exynos_recorder_mode_values" translatable="false">
+        <item>off</item>
+        <item>dummy_encoder</item>
+        <item>dummy_virtual_display</item>
+        <item>real_record</item>
+    </string-array>
     <string-array name="resolution_names">
         <item>@string/resolution_360p</item>
         <item>@string/resolution_480p</item>
