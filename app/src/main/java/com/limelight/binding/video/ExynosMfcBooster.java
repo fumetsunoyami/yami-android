@@ -303,7 +303,14 @@ public class ExynosMfcBooster {
         } else if (RES_1080P.equalsIgnoreCase(resolutionPref)) {
             return new Point(1920, 1080);
         } else {
-            // Native: ensure dimensions are even numbers (multiples of 2 for AVC encoder)
+            // Native: cap at 1920x1080 (max level supported by mobile AVC encoder) to prevent codec crash
+            if (screenW > 1920 || screenH > 1080) {
+                float aspect = (float) screenW / (float) screenH;
+                int maxW = 1920;
+                int maxH = (int) (maxW / aspect);
+                maxH = (maxH / 2) * 2;
+                return new Point(maxW, maxH);
+            }
             int w = (screenW / 2) * 2;
             int h = (screenH / 2) * 2;
             return new Point(w, h);

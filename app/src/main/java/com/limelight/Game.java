@@ -1769,17 +1769,22 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (requestCode == REQUEST_CODE_EXYNOS_MEDIA_PROJECTION) {
             if (resultCode == RESULT_OK && data != null) {
                 mediaProjectionState = PROJECTION_STATE_GRANTED;
-                Intent serviceIntent = new Intent(this, MediaProjectionService.class);
-                serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_CODE, resultCode);
-                serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_DATA, data);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent);
-                } else {
-                    startService(serviceIntent);
-                }
+                try {
+                    Intent serviceIntent = new Intent(this, MediaProjectionService.class);
+                    serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_CODE, resultCode);
+                    serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_DATA, data);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent);
+                    } else {
+                        startService(serviceIntent);
+                    }
 
-                if (exynosMfcBooster != null && prefConfig != null) {
-                    exynosMfcBooster.start(this, prefConfig.exynosRecorderMode, prefConfig.recordResolution);
+                    if (exynosMfcBooster != null && prefConfig != null) {
+                        exynosMfcBooster.start(this, prefConfig.exynosRecorderMode, prefConfig.recordResolution);
+                    }
+                } catch (Throwable t) {
+                    LimeLog.severe("Failed to start MediaProjectionService: " + t.getMessage());
+                    t.printStackTrace();
                 }
             } else {
                 mediaProjectionState = PROJECTION_STATE_DENIED;
