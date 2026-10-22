@@ -1704,9 +1704,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         hideSystemUi(50);
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
+    private void startExynosBoosterIfConnected() {
+        if (!connected || isFinishing() || isDestroyed()) {
+            return;
+        }
 
         if (exynosMfcBooster != null && prefConfig != null) {
             String mode = prefConfig.exynosRecorderMode;
@@ -1726,6 +1727,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             } else {
                 exynosMfcBooster.start(this, mode, prefConfig.recordResolution);
             }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (connected) {
+            startExynosBoosterIfConnected();
         }
     }
 
@@ -3503,6 +3512,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private void stopConnection() {
         if (connecting || connected) {
             connecting = connected = false;
+            if (exynosMfcBooster != null) {
+                exynosMfcBooster.stop();
+            }
             updatePipAutoEnter();
 
             controllerHandler.stop();
@@ -3748,6 +3760,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     }
                 }, 500);
 
+                // Safely activate Exynos Booster AFTER stream decoder has rendered first frames
+                timerHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        startExynosBoosterIfConnected();
+                    }
+                }, 600);
                 // Keep the display on
                 getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
