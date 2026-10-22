@@ -54,6 +54,20 @@ public class MediaProjectionService extends Service {
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
+        try {
+            Notification notification = createNotification();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                );
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Throwable t) {
+            LimeLog.severe("MediaProjectionService: onCreate startForeground failed: " + t.getMessage());
+        }
     }
 
     @Override

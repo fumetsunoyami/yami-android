@@ -61,6 +61,7 @@ public class ExynosMfcBooster {
     private boolean muxerStarted = false;
 
     private Thread drainThread;
+    private Thread feedThread;
     private volatile boolean isRunning = false;
     private String currentMode = MODE_OFF;
     private String currentResolution = RES_NATIVE;
@@ -85,7 +86,8 @@ public class ExynosMfcBooster {
             return;
         }
 
-        stop();
+        // Clean up encoder and feeder without killing MediaProjectionService
+        stopEncoderOnly();
 
         LimeLog.info("ExynosMfcBooster: Starting with mode='" + mode + "', resolution='" + currentResolution + "'");
         currentMode = mode;
@@ -137,6 +139,7 @@ public class ExynosMfcBooster {
         }
 
         startDrainThread(false);
+        startFeedThread();
     }
 
     /**
@@ -387,21 +390,64 @@ public class ExynosMfcBooster {
     }
 
     /**
-     * Stop booster and clean up all hardware and service resources.
+     * Actively feed 60 changing frames per second into the hardware encoder inputSurface.
+     * This forces the Exynos MFC hardware encoder to actively encode 720p60 video in real-time,
+     * pushing the Exynos DVFS clock governor to maximum frequency (845MHz) for 7-9ms decode latency.
      */
-    public synchronized void stop() {
-        if (!isRunning && currentMode.equals(MODE_OFF)) {
-            return;
-        }
+    private void startFeedThread() {
+        feedThread = new Thread(() -> {
+            int frame = 0;
+            long intervalMs = 16; // ~60fps
+            LimeLog.info("ExynosMfcBooster: Active 60fps frame feeder thread started");
+            while (isRunning) {
+                long start = System.currentTimeMillis();
+                try {
+                    Surface surf = inputSurface;
+                    if (surf != null && surf.isValid()) {
+                        android.graphics.Canvas canvas = surf.lockCanvas(null);
+                        if (canvas != null) {
+                            int c = (frame % 256);
+                            canvas.drawRGB(c, c, c);
+                            surf.unlockCanvasAndPost(canvas);
+                            frame++;
+                        }
+                    }
+                } catch (Exception ignored) {
+                    break;
+                }
+                long elapsed = System.currentTimeMillis() - start;
+                long sleep = intervalMs - elapsed;
+                if (sleep > 0) {
+                    try {
+                        Thread.sleep(sleep);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+            }
+            LimeLog.info("ExynosMfcBooster: Frame feeder thread terminated");
+        }, "ExynosActiveFeeder");
+        feedThread.start();
+    }
 
-        LimeLog.info("ExynosMfcBooster: Stopping booster...");
+    /**
+     * Stop encoder and threads without killing MediaProjectionService.
+     */
+    private void stopEncoderOnly() {
         isRunning = false;
-
         MediaProjectionService.setCallback(null);
+
+        if (feedThread != null) {
+            feedThread.interrupt();
+            try {
+                feedThread.join(300);
+            } catch (InterruptedException ignored) {}
+            feedThread = null;
+        }
 
         if (drainThread != null) {
             try {
-                drainThread.join(500);
+                drainThread.join(300);
             } catch (InterruptedException ignored) {}
             drainThread = null;
         }
@@ -446,6 +492,18 @@ public class ExynosMfcBooster {
             mediaMuxer = null;
             muxerStarted = false;
         }
+    }
+
+    /**
+     * Stop booster and clean up all hardware and service resources.
+     */
+    public synchronized void stop() {
+        if (!isRunning && currentMode.equals(MODE_OFF)) {
+            return;
+        }
+
+        LimeLog.info("ExynosMfcBooster: Stopping booster...");
+        stopEncoderOnly();
 
         if (appContext != null) {
             try {
