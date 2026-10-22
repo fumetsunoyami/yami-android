@@ -46,9 +46,9 @@ public class ExynosMfcBooster {
     public static final String RES_720P = "720p";
 
     private static final String MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC;
-    private static final int DUMMY_WIDTH = 176;
-    private static final int DUMMY_HEIGHT = 144;
-    private static final int DUMMY_BITRATE = 100_000; // 100 kbps
+    private static final int DUMMY_WIDTH = 1280;
+    private static final int DUMMY_HEIGHT = 720;
+    private static final int DUMMY_BITRATE = 8_000_000; // 8 Mbps to trigger Exynos high-frequency MFC state
     private static final int DUMMY_FPS = 60;
     private static final int DUMMY_OPERATING_RATE = 120;
     private static final int DENSITY_DPI = 160;
@@ -179,15 +179,20 @@ public class ExynosMfcBooster {
     }
 
     private void initSimulatedProjection(Context context, MediaProjection projection) throws Exception {
-        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, DUMMY_BITRATE, DUMMY_FPS, DUMMY_OPERATING_RATE);
+        Point size = resolveResolution(context, currentResolution);
+        int simWidth = size.x;
+        int simHeight = size.y;
+        int simBitrate = (simWidth >= 1920) ? 12_000_000 : 8_000_000;
+
+        setupEncoder(simWidth, simHeight, simBitrate, 60, 120);
 
         DisplayMetrics metrics = context.getResources().getDisplayMetrics();
         int dpi = metrics.densityDpi;
 
         virtualDisplay = projection.createVirtualDisplay(
                 "YamiSimulatedScreenRecord",
-                DUMMY_WIDTH,
-                DUMMY_HEIGHT,
+                simWidth,
+                simHeight,
                 dpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 inputSurface,
@@ -195,7 +200,7 @@ public class ExynosMfcBooster {
                 null
         );
 
-        LimeLog.info("ExynosMfcBooster: MediaProjection VirtualDisplay created (Auto-mirror active)");
+        LimeLog.info("ExynosMfcBooster: MediaProjection VirtualDisplay created (Auto-mirror active, " + simWidth + "x" + simHeight + ")");
         startDrainThread(false);
     }
 
