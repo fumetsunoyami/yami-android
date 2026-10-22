@@ -110,6 +110,8 @@ public class PreferenceConfiguration {
     private static final String CHECKBOX_HIDE_CLIPBOARD_CONTENT = "checkbox_hide_clipboard_content";
     public static final String EXYNOS_RECORDER_MODE_PREF_STRING = "pref_exynos_recorder_mode";
     public static final String DEFAULT_EXYNOS_RECORDER_MODE = "off";
+    public static final String RECORD_RESOLUTION_PREF_STRING = "pref_record_resolution";
+    public static final String DEFAULT_RECORD_RESOLUTION = "native";
 
     private static final String CHECKBOX_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD = "checkbox_enable_sticky_modifier_key_virtual_keyboard";
 
@@ -394,6 +396,7 @@ public class PreferenceConfiguration {
     private static final String NUMBER_PAN_OFFSET_X = "number_pan_offset_x";
     private static final String NUMBER_PAN_OFFSET_Y = "number_pan_offset_y";
     public String exynosRecorderMode;
+    public String recordResolution;
 
     public static boolean isNativeResolution(int width, int height) {
         // It's not a native resolution if it matches an existing resolution option
@@ -1025,6 +1028,7 @@ private static int getFramePacingValue(Context context) {
         config.enableRumble = prefs.getBoolean(ENABLE_RUMBLE_PREF_STRING, DEFAULT_ENABLE_RUMBLE);
         config.preventPacketLoss = prefs.getBoolean(PREVENT_PACKET_LOSS_PREF_STRING, DEFAULT_PREVENT_PACKET_LOSS);
         config.exynosRecorderMode = prefs.getString(EXYNOS_RECORDER_MODE_PREF_STRING, DEFAULT_EXYNOS_RECORDER_MODE);
+        config.recordResolution = prefs.getString(RECORD_RESOLUTION_PREF_STRING, DEFAULT_RECORD_RESOLUTION);
 
         // Read custom values
         config.customResolution = prefs.getString(CUSTOM_RESOLUTION_PREF_STRING, null);

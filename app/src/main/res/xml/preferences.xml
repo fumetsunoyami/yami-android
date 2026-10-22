@@ -18,6 +18,14 @@
             android:title="@string/title_exynos_recorder_mode"
             app:iconSpaceReserved="false" />
         <ListPreference
+            android:defaultValue="native"
+            android:entries="@array/record_resolution_names"
+            android:entryValues="@array/record_resolution_values"
+            android:key="pref_record_resolution"
+            android:summary="@string/summary_record_resolution"
+            android:title="@string/title_record_resolution"
+            app:iconSpaceReserved="false" />
+        <ListPreference
             android:defaultValue="1280x720"
             android:entries="@array/resolution_names"
             android:entryValues="@array/resolution_values"

@@ -1,17 +1,21 @@
 package com.limelight.binding.video;
 
 import android.content.Context;
-import android.graphics.Canvas;
-import android.graphics.Color;
+import android.content.Intent;
+import android.graphics.Point;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.media.projection.MediaProjection;
 import android.os.Build;
 import android.os.Environment;
+import android.util.DisplayMetrics;
+import android.view.Display;
 import android.view.Surface;
+import android.view.WindowManager;
 
 import com.limelight.LimeLog;
 
@@ -22,18 +26,26 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Exynos MFC (Multi-Format Codec) Booster & Screen Recorder Simulation.
+ * Exynos MFC Booster & Screen Recorder Simulation (Yami).
  *
- * Forces Samsung Exynos hardware decoder and SurfaceFlinger pipeline to run at
- * maximum operating frequency and lowest latency by emulating/executing video recording.
+ * Implements 4 modes:
+ * - off: Disabled
+ * - dummy_display: VirtualDisplay via DisplayManager (No system permission required)
+ * - simulated_projection: System-level screen recording simulation via MediaProjection
+ *                         (Triggers Samsung One UI native screen recording governor, 0 byte storage)
+ * - real_record: Actual screen recording with user-configurable resolution, saved to Movies/Yami
  */
 public class ExynosMfcBooster {
     public static final String MODE_OFF = "off";
-    public static final String MODE_DUMMY_ENCODER = "dummy_encoder";
-    public static final String MODE_DUMMY_VIRTUAL_DISPLAY = "dummy_virtual_display";
+    public static final String MODE_DUMMY_DISPLAY = "dummy_display";
+    public static final String MODE_SIMULATED_PROJECTION = "simulated_projection";
     public static final String MODE_REAL_RECORD = "real_record";
 
-    private static final String MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC; // "video/avc"
+    public static final String RES_NATIVE = "native";
+    public static final String RES_1080P = "1080p";
+    public static final String RES_720P = "720p";
+
+    private static final String MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC;
     private static final int DUMMY_WIDTH = 176;
     private static final int DUMMY_HEIGHT = 144;
     private static final int DUMMY_BITRATE = 100_000; // 100 kbps
@@ -51,18 +63,22 @@ public class ExynosMfcBooster {
     private Thread drainThread;
     private volatile boolean isRunning = false;
     private String currentMode = MODE_OFF;
+    private String currentResolution = RES_NATIVE;
+
+    private Context appContext;
 
     /**
-     * Start MFC Booster with specified mode.
-     *
-     * @param context Android context
-     * @param mode    Booster mode ("off", "dummy_encoder", "dummy_virtual_display", "real_record")
+     * Start the booster. If mode requires MediaProjection (simulated_projection or real_record),
+     * it will wait for MediaProjectionService or start with the active projection if available.
      */
-    public synchronized void start(Context context, String mode) {
+    public synchronized void start(Context context, String mode, String resolution) {
         if (mode == null || mode.equals(MODE_OFF)) {
             stop();
             return;
         }
+
+        this.appContext = context.getApplicationContext();
+        this.currentResolution = (resolution != null) ? resolution : RES_NATIVE;
 
         if (isRunning && mode.equals(currentMode)) {
             LimeLog.info("ExynosMfcBooster: Already active in mode: " + mode);
@@ -71,16 +87,16 @@ public class ExynosMfcBooster {
 
         stop();
 
-        LimeLog.info("ExynosMfcBooster: Starting in mode '" + mode + "'");
+        LimeLog.info("ExynosMfcBooster: Starting with mode='" + mode + "', resolution='" + currentResolution + "'");
         currentMode = mode;
 
         try {
             switch (mode) {
-                case MODE_DUMMY_ENCODER:
-                    startDummyEncoder();
+                case MODE_DUMMY_DISPLAY:
+                    startDummyDisplay(context);
                     break;
-                case MODE_DUMMY_VIRTUAL_DISPLAY:
-                    startDummyVirtualDisplay(context);
+                case MODE_SIMULATED_PROJECTION:
+                    startSimulatedProjection(context);
                     break;
                 case MODE_REAL_RECORD:
                     startRealRecord(context);
@@ -91,14 +107,206 @@ public class ExynosMfcBooster {
                     break;
             }
         } catch (Exception e) {
-            LimeLog.severe("ExynosMfcBooster: Failed to start (" + mode + "): " + e.getMessage());
+            LimeLog.severe("ExynosMfcBooster: Start failed (" + mode + "): " + e.getMessage());
             e.printStackTrace();
             stop();
         }
     }
 
     /**
-     * Configure and start hardware video encoder.
+     * Mode 2: Encoder + VirtualDisplay (Internal, no system permission required).
+     */
+    private void startDummyDisplay(Context context) throws Exception {
+        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, DUMMY_BITRATE, DUMMY_FPS, DUMMY_OPERATING_RATE);
+
+        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null) {
+            int flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+                flags |= DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY;
+            }
+            virtualDisplay = dm.createVirtualDisplay(
+                    "YamiExynosBoosterDisplay",
+                    DUMMY_WIDTH,
+                    DUMMY_HEIGHT,
+                    DENSITY_DPI,
+                    inputSurface,
+                    flags
+            );
+            LimeLog.info("ExynosMfcBooster: Internal VirtualDisplay created (" + DUMMY_WIDTH + "x" + DUMMY_HEIGHT + ")");
+        }
+
+        startDrainThread(false);
+    }
+
+    /**
+     * Mode 3: Simulated Screen Recording using MediaProjection.
+     * Triggers Samsung One UI's native screen recording governor profile for maximum MFC clock,
+     * while discarding all output buffers (0 byte storage overhead).
+     */
+    private void startSimulatedProjection(Context context) throws Exception {
+        MediaProjection projection = MediaProjectionService.getActiveMediaProjection();
+        if (projection == null) {
+            LimeLog.info("ExynosMfcBooster: Awaiting MediaProjection for simulated_projection");
+            MediaProjectionService.setCallback(new MediaProjectionService.MediaProjectionCallback() {
+                @Override
+                public void onProjectionReady(MediaProjection p) {
+                    synchronized (ExynosMfcBooster.this) {
+                        if (currentMode.equals(MODE_SIMULATED_PROJECTION) && !isRunning) {
+                            try {
+                                initSimulatedProjection(context, p);
+                            } catch (Exception e) {
+                                LimeLog.severe("ExynosMfcBooster: Deferred projection init failed: " + e.getMessage());
+                                stop();
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void onProjectionStopped() {
+                    synchronized (ExynosMfcBooster.this) {
+                        if (currentMode.equals(MODE_SIMULATED_PROJECTION)) {
+                            stop();
+                        }
+                    }
+                }
+            });
+            return;
+        }
+
+        initSimulatedProjection(context, projection);
+    }
+
+    private void initSimulatedProjection(Context context, MediaProjection projection) throws Exception {
+        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, DUMMY_BITRATE, DUMMY_FPS, DUMMY_OPERATING_RATE);
+
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        int dpi = metrics.densityDpi;
+
+        virtualDisplay = projection.createVirtualDisplay(
+                "YamiSimulatedScreenRecord",
+                DUMMY_WIDTH,
+                DUMMY_HEIGHT,
+                dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                inputSurface,
+                null,
+                null
+        );
+
+        LimeLog.info("ExynosMfcBooster: MediaProjection VirtualDisplay created (Auto-mirror active)");
+        startDrainThread(false);
+    }
+
+    /**
+     * Mode 4: Real Recording with configurable resolution (native, 1080p, 720p).
+     * Saves MP4 file to /Movies/Yami.
+     */
+    private void startRealRecord(Context context) throws Exception {
+        MediaProjection projection = MediaProjectionService.getActiveMediaProjection();
+        if (projection == null) {
+            LimeLog.info("ExynosMfcBooster: Awaiting MediaProjection for real_record");
+            MediaProjectionService.setCallback(new MediaProjectionService.MediaProjectionCallback() {
+                @Override
+                public void onProjectionReady(MediaProjection p) {
+                    synchronized (ExynosMfcBooster.this) {
+                        if (currentMode.equals(MODE_REAL_RECORD) && !isRunning) {
+                            try {
+                                initRealRecord(context, p);
+                            } catch (Exception e) {
+                                LimeLog.severe("ExynosMfcBooster: Deferred real record init failed: " + e.getMessage());
+                                stop();
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void onProjectionStopped() {
+                    synchronized (ExynosMfcBooster.this) {
+                        if (currentMode.equals(MODE_REAL_RECORD)) {
+                            stop();
+                        }
+                    }
+                }
+            });
+            return;
+        }
+
+        initRealRecord(context, projection);
+    }
+
+    private void initRealRecord(Context context, MediaProjection projection) throws Exception {
+        Point size = resolveResolution(context, currentResolution);
+        int recWidth = size.x;
+        int recHeight = size.y;
+        int recBitrate = (recWidth >= 1920) ? 15_000_000 : 8_000_000;
+
+        File movieDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "Yami");
+        if (!movieDir.exists()) {
+            if (!movieDir.mkdirs()) {
+                File fallback = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES);
+                if (fallback != null) {
+                    movieDir = new File(fallback, "Yami");
+                    movieDir.mkdirs();
+                }
+            }
+        }
+
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        File outputFile = new File(movieDir, "Yami_Record_" + timeStamp + ".mp4");
+        LimeLog.info("ExynosMfcBooster: Recording to: " + outputFile.getAbsolutePath() + " (" + recWidth + "x" + recHeight + ")");
+
+        mediaMuxer = new MediaMuxer(outputFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        muxerStarted = false;
+        videoTrackIndex = -1;
+
+        setupEncoder(recWidth, recHeight, recBitrate, 60, 120);
+
+        DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+        int dpi = metrics.densityDpi;
+
+        virtualDisplay = projection.createVirtualDisplay(
+                "YamiRealScreenRecord",
+                recWidth,
+                recHeight,
+                dpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                inputSurface,
+                null,
+                null
+        );
+
+        startDrainThread(true);
+    }
+
+    /**
+     * Compute recording resolution based on preference.
+     */
+    private Point resolveResolution(Context context, String resolutionPref) {
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        Display display = wm.getDefaultDisplay();
+        Point realSize = new Point();
+        display.getRealSize(realSize);
+
+        int screenW = Math.max(realSize.x, realSize.y);
+        int screenH = Math.min(realSize.x, realSize.y);
+
+        if (RES_720P.equalsIgnoreCase(resolutionPref)) {
+            return new Point(1280, 720);
+        } else if (RES_1080P.equalsIgnoreCase(resolutionPref)) {
+            return new Point(1920, 1080);
+        } else {
+            // Native: ensure dimensions are even numbers (multiples of 2 for AVC encoder)
+            int w = (screenW / 2) * 2;
+            int h = (screenH / 2) * 2;
+            return new Point(w, h);
+        }
+    }
+
+    /**
+     * Setup MediaCodec video encoder.
      */
     private void setupEncoder(int width, int height, int bitrate, int fps, int operatingRate) throws Exception {
         MediaFormat format = MediaFormat.createVideoFormat(MIME_TYPE, width, height);
@@ -116,146 +324,19 @@ public class ExynosMfcBooster {
         encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         inputSurface = encoder.createInputSurface();
         encoder.start();
-        LimeLog.info("ExynosMfcBooster: AVC hardware encoder started (" + width + "x" + height + ")");
+        LimeLog.info("ExynosMfcBooster: Hardware encoder started (" + width + "x" + height + " @ " + bitrate + "bps)");
     }
 
     /**
-     * Level 1: Dummy Hardware Encoder.
-     * Renders a single black frame and drops first output buffer, staying in Executing state.
+     * Start background drain thread.
+     * @param writeToMuxer true if writing MP4 to MediaMuxer, false if discarding buffers immediately.
      */
-    private void startDummyEncoder() throws Exception {
-        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, DUMMY_BITRATE, DUMMY_FPS, DUMMY_OPERATING_RATE);
-
-        // Draw exactly 1 black frame to trigger the hardware pipeline
-        Canvas canvas = null;
-        try {
-            canvas = inputSurface.lockCanvas(null);
-            if (canvas != null) {
-                canvas.drawColor(Color.BLACK);
-            }
-        } finally {
-            if (canvas != null) {
-                inputSurface.unlockCanvasAndPost(canvas);
-            }
-        }
-
-        // Dequeue and discard the first output buffer
-        MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-        for (int i = 0; i < 20; i++) {
-            int index = encoder.dequeueOutputBuffer(bufferInfo, 50_000);
-            if (index >= 0) {
-                encoder.releaseOutputBuffer(index, false);
-                LimeLog.info("ExynosMfcBooster: Level 1 initial buffer released (" + index + ")");
-                break;
-            } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                LimeLog.info("ExynosMfcBooster: Level 1 encoder format: " + encoder.getOutputFormat());
-            }
-        }
-
+    private void startDrainThread(boolean writeToMuxer) {
         isRunning = true;
-        LimeLog.info("ExynosMfcBooster: Level 1 (Dummy Hardware Encoder) active");
-    }
-
-    /**
-     * Level 2: Encoder + VirtualDisplay.
-     * VirtualDisplay sends frames to encoder; background loop constantly drains buffers without file I/O.
-     */
-    private void startDummyVirtualDisplay(Context context) throws Exception {
-        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, DUMMY_BITRATE, DUMMY_FPS, DUMMY_OPERATING_RATE);
-
-        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
-        if (dm != null) {
-            int flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
-                flags |= DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY;
-            }
-            virtualDisplay = dm.createVirtualDisplay(
-                    "YamiExynosBoosterDisplay",
-                    DUMMY_WIDTH,
-                    DUMMY_HEIGHT,
-                    DENSITY_DPI,
-                    inputSurface,
-                    flags
-            );
-            LimeLog.info("ExynosMfcBooster: VirtualDisplay created (" + DUMMY_WIDTH + "x" + DUMMY_HEIGHT + ")");
-        } else {
-            LimeLog.warning("ExynosMfcBooster: DisplayManager unavailable");
-        }
-
-        isRunning = true;
-
-        // Drain background thread to release all output buffers without writing to disk
         drainThread = new Thread(() -> {
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            LimeLog.info("ExynosMfcBooster: Level 2 drain loop started");
-            while (isRunning) {
-                try {
-                    MediaCodec codec = encoder;
-                    if (codec == null) break;
+            LimeLog.info("ExynosMfcBooster: Drain thread started (writeToMuxer=" + writeToMuxer + ")");
 
-                    int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 50_000);
-                    if (outputIndex >= 0) {
-                        codec.releaseOutputBuffer(outputIndex, false);
-                    }
-                } catch (IllegalStateException e) {
-                    // Codec stopped or released
-                    break;
-                } catch (Exception e) {
-                    LimeLog.warning("ExynosMfcBooster: Drain loop error: " + e.getMessage());
-                    break;
-                }
-            }
-            LimeLog.info("ExynosMfcBooster: Level 2 drain loop finished");
-        }, "ExynosMfcDrainThread");
-        drainThread.start();
-    }
-
-    /**
-     * Real Record: Record frames into MP4 file in Movies/Artemis using MediaMuxer.
-     */
-    private void startRealRecord(Context context) throws Exception {
-        File movieDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "Artemis");
-        if (!movieDir.exists()) {
-            if (!movieDir.mkdirs()) {
-                File fallback = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES);
-                if (fallback != null) {
-                    movieDir = new File(fallback, "Artemis");
-                    movieDir.mkdirs();
-                }
-            }
-        }
-
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
-        File outputFile = new File(movieDir, "Artemis_Record_" + timeStamp + ".mp4");
-        LimeLog.info("ExynosMfcBooster: Output MP4 file: " + outputFile.getAbsolutePath());
-
-        mediaMuxer = new MediaMuxer(outputFile.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-        muxerStarted = false;
-        videoTrackIndex = -1;
-
-        setupEncoder(DUMMY_WIDTH, DUMMY_HEIGHT, 2_000_000, 60, 120);
-
-        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
-        if (dm != null) {
-            int flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
-                flags |= DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY;
-            }
-            virtualDisplay = dm.createVirtualDisplay(
-                    "YamiExynosRecordDisplay",
-                    DUMMY_WIDTH,
-                    DUMMY_HEIGHT,
-                    DENSITY_DPI,
-                    inputSurface,
-                    flags
-            );
-        }
-
-        isRunning = true;
-
-        drainThread = new Thread(() -> {
-            MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
-            LimeLog.info("ExynosMfcBooster: Real record muxing thread started");
             while (isRunning) {
                 try {
                     MediaCodec codec = encoder;
@@ -263,17 +344,17 @@ public class ExynosMfcBooster {
 
                     int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 50_000);
                     if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        if (!muxerStarted && mediaMuxer != null) {
+                        if (writeToMuxer && !muxerStarted && mediaMuxer != null) {
                             MediaFormat newFormat = codec.getOutputFormat();
                             videoTrackIndex = mediaMuxer.addTrack(newFormat);
                             mediaMuxer.start();
                             muxerStarted = true;
-                            LimeLog.info("ExynosMfcBooster: MediaMuxer started with track " + videoTrackIndex);
+                            LimeLog.info("ExynosMfcBooster: MediaMuxer started track " + videoTrackIndex);
                         }
                     } else if (outputIndex >= 0) {
-                        ByteBuffer encodedData = codec.getOutputBuffer(outputIndex);
-                        if (encodedData != null && muxerStarted && bufferInfo.size > 0) {
-                            if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                        if (writeToMuxer && muxerStarted && mediaMuxer != null && bufferInfo.size > 0) {
+                            ByteBuffer encodedData = codec.getOutputBuffer(outputIndex);
+                            if (encodedData != null && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                                 encodedData.position(bufferInfo.offset);
                                 encodedData.limit(bufferInfo.offset + bufferInfo.size);
                                 mediaMuxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo);
@@ -284,25 +365,27 @@ public class ExynosMfcBooster {
                 } catch (IllegalStateException e) {
                     break;
                 } catch (Exception e) {
-                    LimeLog.warning("ExynosMfcBooster: Recording error: " + e.getMessage());
+                    LimeLog.warning("ExynosMfcBooster: Drain thread exception: " + e.getMessage());
                     break;
                 }
             }
-            LimeLog.info("ExynosMfcBooster: Real record muxing thread terminated");
-        }, "ExynosMfcRecordThread");
+            LimeLog.info("ExynosMfcBooster: Drain thread terminated");
+        }, "ExynosMfcDrainThread");
         drainThread.start();
     }
 
     /**
-     * Stop and safely release all hardware and muxer resources.
+     * Stop booster and clean up all hardware and service resources.
      */
     public synchronized void stop() {
         if (!isRunning && currentMode.equals(MODE_OFF)) {
             return;
         }
 
-        LimeLog.info("ExynosMfcBooster: Stopping booster and cleaning up resources...");
+        LimeLog.info("ExynosMfcBooster: Stopping booster...");
         isRunning = false;
+
+        MediaProjectionService.setCallback(null);
 
         if (drainThread != null) {
             try {
@@ -315,7 +398,7 @@ public class ExynosMfcBooster {
             try {
                 virtualDisplay.release();
             } catch (Exception e) {
-                LimeLog.warning("ExynosMfcBooster: VirtualDisplay release error: " + e.getMessage());
+                LimeLog.warning("ExynosMfcBooster: Error releasing VirtualDisplay: " + e.getMessage());
             }
             virtualDisplay = null;
         }
@@ -324,7 +407,7 @@ public class ExynosMfcBooster {
             try {
                 inputSurface.release();
             } catch (Exception e) {
-                LimeLog.warning("ExynosMfcBooster: inputSurface release error: " + e.getMessage());
+                LimeLog.warning("ExynosMfcBooster: Error releasing inputSurface: " + e.getMessage());
             }
             inputSurface = null;
         }
@@ -352,20 +435,20 @@ public class ExynosMfcBooster {
             muxerStarted = false;
         }
 
+        if (appContext != null) {
+            try {
+                appContext.stopService(new Intent(appContext, MediaProjectionService.class));
+            } catch (Exception ignored) {}
+        }
+
         currentMode = MODE_OFF;
-        LimeLog.info("ExynosMfcBooster: Stopped successfully");
+        LimeLog.info("ExynosMfcBooster: Stopped completely");
     }
 
-    /**
-     * Check whether booster is actively running.
-     */
     public synchronized boolean isRunning() {
         return isRunning;
     }
 
-    /**
-     * Get active mode.
-     */
     public synchronized String getCurrentMode() {
         return currentMode;
     }

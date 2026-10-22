@@ -26,6 +26,8 @@ import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardControlle
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
 import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.ExynosMfcBooster;
+import com.limelight.binding.video.MediaProjectionService;
+import android.media.projection.MediaProjectionManager;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
@@ -178,6 +180,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private KeyBoardLayoutController keyBoardLayoutController;
 
     private PreferenceConfiguration prefConfig;
+    public static final int REQUEST_CODE_EXYNOS_MEDIA_PROJECTION = 9923;
     private ExynosMfcBooster exynosMfcBooster;
     private SharedPreferences tombstonePrefs;
 
@@ -1706,7 +1709,47 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         super.onResume();
 
         if (exynosMfcBooster != null && prefConfig != null) {
-            exynosMfcBooster.start(this, prefConfig.exynosRecorderMode);
+            String mode = prefConfig.exynosRecorderMode;
+            if (ExynosMfcBooster.MODE_SIMULATED_PROJECTION.equals(mode) || ExynosMfcBooster.MODE_REAL_RECORD.equals(mode)) {
+                if (MediaProjectionService.getActiveMediaProjection() == null) {
+                    MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+                    if (mpm != null) {
+                        try {
+                            startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_EXYNOS_MEDIA_PROJECTION);
+                        } catch (Exception e) {
+                            LimeLog.severe("Failed to launch MediaProjection intent: " + e.getMessage());
+                        }
+                    }
+                } else {
+                    exynosMfcBooster.start(this, mode, prefConfig.recordResolution);
+                }
+            } else {
+                exynosMfcBooster.start(this, mode, prefConfig.recordResolution);
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQUEST_CODE_EXYNOS_MEDIA_PROJECTION) {
+            if (resultCode == RESULT_OK && data != null) {
+                Intent serviceIntent = new Intent(this, MediaProjectionService.class);
+                serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_CODE, resultCode);
+                serviceIntent.putExtra(MediaProjectionService.EXTRA_RESULT_DATA, data);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent);
+                } else {
+                    startService(serviceIntent);
+                }
+
+                if (exynosMfcBooster != null && prefConfig != null) {
+                    exynosMfcBooster.start(this, prefConfig.exynosRecorderMode, prefConfig.recordResolution);
+                }
+            } else {
+                LimeLog.warning("Exynos Screen Recorder: MediaProjection consent denied by user");
+            }
         }
     }
 
