@@ -61,7 +61,9 @@ public class MediaProjectionService extends Service {
         }
 
         int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED);
-        Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
+        Intent resultData = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                ? intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent.class)
+                : intent.getParcelableExtra(EXTRA_RESULT_DATA);
 
         Notification notification = createNotification();
 
@@ -84,7 +86,11 @@ public class MediaProjectionService extends Service {
                     } catch (Exception ignored) {}
                 }
 
-                activeMediaProjection = mpm.getMediaProjection(resultCode, resultData);
+                try {
+                    activeMediaProjection = mpm.getMediaProjection(resultCode, resultData);
+                } catch (Exception e) {
+                    LimeLog.severe("MediaProjectionService: getMediaProjection threw exception: " + e.getMessage());
+                }
                 if (activeMediaProjection != null) {
                     LimeLog.info("MediaProjectionService: MediaProjection initialized successfully");
                     activeMediaProjection.registerCallback(new MediaProjection.Callback() {
