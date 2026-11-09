@@ -11,8 +11,8 @@ android {
         minSdk 21
         targetSdk 34
 
-        versionName "20.3.0-experimental.9"
-        versionCode = 57
+        versionName "2026.0.1"
+        versionCode = 2026001
 
         // Generate native debug symbols to allow Google Play to symbolicate our native crashes
         ndk.debugSymbolLevel = 'FULL'
@@ -139,6 +139,7 @@ android {
             resValue "string", "app_label_root", "Yami (Root)"
             resValue "string", "app_label_game", "Yami (Game)"
 
+            signingConfig signingConfigs.debug
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
