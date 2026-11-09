@@ -93,8 +93,8 @@ Yami carries over all enhancements from Artemis (Moonlight Noir):
 ### Build Steps
 1. Clone the repository and initialize submodules:
    ```bash
-   git clone --recursive https://github.com/<your-username>/yami.git
-   cd yami
+   git clone --recursive https://github.com/fumetsunoyami/yami-android.git
+   cd yami-android
    git submodule update --init --recursive
    ```
 
@@ -121,7 +121,7 @@ Yami carries over all enhancements from Artemis (Moonlight Noir):
 - **Artemis (Moonlight Noir)** by [ClassicOldSong](https://github.com/ClassicOldSong) - Base client and virtualization architecture.
 - **Moonlight Android** by [Cameron Gutman](https://github.com/cgutman) and the Moonlight Stream team.
 - **Apollo** & **Sunshine** by the open-source community.
-- **Yami** additions by [Viet Le](https://github.com) - Exynos MFC hardware clock booster, active frame feeder pipeline, and Android 14+ compatibility fixes.
+- **Yami** additions by [Viet Le](https://github.com/fumetsunoyami) - Exynos MFC hardware clock booster, active frame feeder pipeline, and Android 14+ compatibility fixes.
 
 ---
 
